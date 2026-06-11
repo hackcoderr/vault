@@ -385,7 +385,94 @@ vault kv metadata delete secret/myapp
 
 ---
 
-## 12. Create and Manage Policies
+## 12. Dynamic Secrets
+
+Dynamic secrets are one of Vault's most important features.
+
+Instead of storing one long-lived password and sharing it everywhere, Vault can generate credentials on demand and expire them automatically after a lease period.
+
+Common dynamic secret use cases:
+
+- Database usernames and passwords
+- Cloud credentials
+- PKI certificates
+
+Why this matters:
+
+- Credentials are short-lived
+- Secret rotation becomes automatic
+- Compromised credentials expire quickly
+- Different apps can receive different credentials
+
+Basic dynamic secret flow:
+
+1. Enable a dynamic secrets engine
+2. Configure the backend connection
+3. Create a role describing what Vault may generate
+4. Read credentials from that role
+5. Vault returns leased credentials with a TTL
+
+Example with the database secrets engine:
+
+Enable the engine:
+
+```bash
+vault secrets enable database
+```
+
+Configure a database connection:
+
+```bash
+vault write database/config/my-postgresql-database \
+    plugin_name=postgresql-database-plugin \
+    allowed_roles="readonly" \
+    connection_url="postgresql://{{username}}:{{password}}@127.0.0.1:5432/postgres?sslmode=disable" \
+    username="postgres" \
+    password="postgres"
+```
+
+Create a role that generates read-only credentials:
+
+```bash
+vault write database/roles/readonly \
+    db_name=my-postgresql-database \
+    creation_statements="CREATE ROLE \"{{name}}\" WITH LOGIN PASSWORD '{{password}}' VALID UNTIL '{{expiration}}'; GRANT SELECT ON ALL TABLES IN SCHEMA public TO \"{{name}}\";" \
+    default_ttl="1h" \
+    max_ttl="24h"
+```
+
+Generate dynamic credentials:
+
+```bash
+vault read database/creds/readonly
+```
+
+Typical output contains:
+
+- Generated username
+- Generated password
+- Lease ID
+- Lease duration
+- Renewable status
+
+Lease-related commands:
+
+```bash
+vault lease lookup <lease_id>
+vault lease renew <lease_id>
+vault lease revoke <lease_id>
+```
+
+Important difference:
+
+- `KV secrets` are usually stored by you and then read later
+- `Dynamic secrets` are created by Vault when requested and expire automatically
+
+If you are teaching Vault or documenting its core value, dynamic secrets should always be included because they are a major reason teams adopt Vault in the first place.
+
+---
+
+## 13. Create and Manage Policies
 
 Policies decide what a token can do.
 
@@ -445,7 +532,7 @@ path "secret/metadata/*" {
 
 ---
 
-## 13. Create Tokens
+## 14. Create Tokens
 
 Tokens are direct credentials for Vault access.
 
@@ -508,7 +595,7 @@ For production apps, prefer auth methods like AppRole, Kubernetes, or cloud auth
 
 ---
 
-## 14. Enable AppRole Authentication
+## 15. Enable AppRole Authentication
 
 AppRole is a common machine-to-machine auth method.
 
@@ -567,7 +654,7 @@ Why AppRole is useful:
 
 ---
 
-## 15. Enable Userpass Authentication
+## 16. Enable Userpass Authentication
 
 For simple username/password-based login:
 
@@ -603,7 +690,7 @@ This is useful for:
 
 ---
 
-## 16. Enable Audit Logging
+## 17. Enable Audit Logging
 
 Audit logs are critical in real Vault usage.
 
@@ -633,7 +720,7 @@ Why this matters:
 
 ---
 
-## 17. Seal Vault Again
+## 18. Seal Vault Again
 
 If you need to manually lock Vault:
 
@@ -654,7 +741,7 @@ vault status
 
 ---
 
-## 18. Useful Operator Commands
+## 19. Useful Operator Commands
 
 Leader and HA information:
 
@@ -692,7 +779,7 @@ These are sensitive administrative operations. Use them carefully.
 
 ---
 
-## 19. Useful Read Commands
+## 20. Useful Read Commands
 
 General read helper:
 
@@ -732,7 +819,7 @@ These generic commands are useful when:
 
 ---
 
-## 20. Output Formatting
+## 21. Output Formatting
 
 Vault output can be changed depending on your use case.
 
@@ -759,7 +846,7 @@ This is especially useful for shell scripts and automation.
 
 ---
 
-## 21. End-to-End Example Flow
+## 22. End-to-End Example Flow
 
 This is the shortest practical learning flow from start to finish.
 
@@ -833,7 +920,7 @@ If the token only has read permission, it should read successfully but should no
 
 ---
 
-## 22. Command Order Cheat Sheet
+## 23. Command Order Cheat Sheet
 
 If you want the full flow in one glance, use this order:
 
@@ -848,19 +935,23 @@ If you want the full flow in one glance, use this order:
 9. `vault secrets enable -path=secret kv-v2`
 10. `vault kv put secret/myapp key=value`
 11. `vault kv get secret/myapp`
-12. `vault policy write myapp-policy myapp-policy.hcl`
-13. `vault token create -policy=myapp-policy`
-14. `vault auth enable approle`
-15. `vault write auth/approle/role/myapp-role token_policies="myapp-policy"`
-16. `vault read auth/approle/role/myapp-role/role-id`
-17. `vault write -f auth/approle/role/myapp-role/secret-id`
-18. `vault write auth/approle/login role_id="<role_id>" secret_id="<secret_id>"`
-19. `vault audit enable file file_path=/tmp/vault_audit.log`
-20. `vault operator seal`
+12. `vault secrets enable database`
+13. `vault write database/config/my-postgresql-database ...`
+14. `vault write database/roles/readonly ...`
+15. `vault read database/creds/readonly`
+16. `vault policy write myapp-policy myapp-policy.hcl`
+17. `vault token create -policy=myapp-policy`
+18. `vault auth enable approle`
+19. `vault write auth/approle/role/myapp-role token_policies="myapp-policy"`
+20. `vault read auth/approle/role/myapp-role/role-id`
+21. `vault write -f auth/approle/role/myapp-role/secret-id`
+22. `vault write auth/approle/login role_id="<role_id>" secret_id="<secret_id>"`
+23. `vault audit enable file file_path=/tmp/vault_audit.log`
+24. `vault operator seal`
 
 ---
 
-## 23. Common Mistakes
+## 24. Common Mistakes
 
 - Using dev mode for production
 - Forgetting to save unseal keys securely
@@ -868,10 +959,11 @@ If you want the full flow in one glance, use this order:
 - Distributing root tokens for normal use
 - Hardcoding long-lived tokens in applications
 - Running without audit logging in serious environments
+- Treating dynamic secrets like static secrets and not respecting lease expiry
 
 ---
 
-## 24. Quick Command Reference
+## 25. Quick Command Reference
 
 ### Server
 
@@ -916,6 +1008,18 @@ vault kv list secret/
 vault kv delete secret/myapp
 ```
 
+### Dynamic Secrets
+
+```bash
+vault secrets enable database
+vault write database/config/my-postgresql-database ...
+vault write database/roles/readonly ...
+vault read database/creds/readonly
+vault lease lookup <lease_id>
+vault lease renew <lease_id>
+vault lease revoke <lease_id>
+```
+
 ### Policies
 
 ```bash
@@ -952,7 +1056,7 @@ vault audit disable file/
 
 ---
 
-## 25. Final Summary
+## 26. Final Summary
 
 Vault usage becomes much easier if you remember this sequence:
 
@@ -961,11 +1065,12 @@ Vault usage becomes much easier if you remember this sequence:
 3. Unseal it
 4. Login
 5. Enable a secrets engine
-6. Store secrets
-7. Create policies
-8. Generate tokens or roles
-9. Authenticate applications
-10. Audit and operate Vault safely
+6. Store static secrets if needed
+7. Generate dynamic secrets where possible
+8. Create policies
+9. Generate tokens or roles
+10. Authenticate applications
+11. Audit and operate Vault safely
 
 If you are learning Vault for the first time, practice this order repeatedly:
 
